@@ -1,0 +1,6 @@
+Kvantifikátor,človekodeň,človeko deň,človeko-deň,ČD,človekohodina,človeko-hodina,človeko hodina,hodinová mzda,denná mzda,hod. mzda,normohodina,osobohodina,mesiac
+Hlavička,sadzba práce,sazdby práce,popis práce,mzdové výdavky,počet,množstvo,jednotka
+Pozícia,Administrátor,Analytik,Architekt,Podpora,Programátor,Rutinné práce,Školitel,Špecialista,Technik,Tester,Vedúci projektu,Architekt riešenia,Dizajnér riešenia a používateľského prostredia,UX dizajnér,Dokumentarista,Projektový manažér,Quality manažér,Release manažér,Systémový špecialista,Školiteľ
+Popis práce,riadenie projektu,konzultačné práce,analytické práce,programátorské práce,administratívne práce,školiace práce,inštalačné práce
+Hlavička tabuľky,cena,DPH,človekodeň,človeko deň,človeko-deň,ČD,človekohodina,človeko-hodina,človeko hodina,hodinová mzda,denná mzda,hod. mzda,normohodina,osobohodina,mesiac,sadzba práce,sazdby práce,popis práce,mzdové výdavky,počet,množstvo,jednotka,skupina,celková cena,jednotková cena,názov výdavku,položka,podpoložka
+Hlavička cena,€,DPH,cena,ceny
