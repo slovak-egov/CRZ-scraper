@@ -46,7 +46,7 @@ print('')
 # Gather and check starting date:
 input_date = input("Please enter starting date in the form 'd.m.yyyy', 'b' for beginning of DB records, or 'y' for yesterday: ")
 
-if input_date != 'y' and input_date != 'Y' and input_date != 'b' and input_date != 'B':
+if input_date.lower() != 'y' and input_date.lower() != 'b':
 	check_date = [int(s) for s in re.findall(r'\b\d+\b', input_date)]
 
 	if len(check_date) == 3:
