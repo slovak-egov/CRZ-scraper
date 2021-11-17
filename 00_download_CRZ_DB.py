@@ -35,10 +35,10 @@ def is_leap_year(year):
 
 
 # Check today's date for reference and calculate yesterday's date (last valid date for database xml file):
-x = datetime.datetime.now() - datetime.timedelta(days=1)
+yesterday_date = datetime.datetime.now() - datetime.timedelta(days=1)
 
 # Default ending date is yesterday:
-end_date = x
+end_date = yesterday_date
 
 print("*** Downloading DB of contracts from crz.gov.sk. ***")
 print('')
@@ -55,8 +55,8 @@ if input_date.lower() != 'y' and input_date.lower() != 'b':
 			check_date[2] = int(start_date.year)
 
 		# We cannot start in future years:
-		if check_date[2] > int(x.year):
-			check_date[2] = int(x.year)
+		if check_date[2] > int(yesterday_date.year):
+			check_date[2] = int(yesterday_date.year)
 
 		# There are no more months in a year than 12:
 		if check_date[1] > 12:
@@ -67,8 +67,8 @@ if input_date.lower() != 'y' and input_date.lower() != 'b':
 			check_date[1] = 1
 
 		# We cannot start in future months:
-		if check_date[2] == int(x.year) and check_date[1] > int(x.month):
-			check_date[1] = int(x.month)
+		if check_date[2] == int(yesterday_date.year) and check_date[1] > int(yesterday_date.month):
+			check_date[1] = int(yesterday_date.month)
 
 		# There is no "zero" or "negative" day:b
 		if check_date[0] < 1:
@@ -94,8 +94,8 @@ if input_date.lower() != 'y' and input_date.lower() != 'b':
 				check_date[0] = 30
 
 		# We cannot start today or in the future, because the last xml DB file exists for yesterday:
-		if check_date[2] == int(x.year) and check_date[1] == int(x.month) and check_date[0] > int(x.day):
-			check_date[0] = int(x.day)
+		if check_date[2] == int(yesterday_date.year) and check_date[1] == int(yesterday_date.month) and check_date[0] > int(yesterday_date.day):
+			check_date[0] = int(yesterday_date.day)
 
 		start_date = datetime.date(check_date[2], check_date[1], check_date[0])
 
@@ -111,7 +111,7 @@ elif input_date.lower() == 'b':
 
 # We decided to start yesterday:
 else:
-	start_date = x
+	start_date = yesterday_date
 
 # Gather and check ending date:
 input_date = input("Please enter ending date in the form 'd.m.yyyy' or 'y' for yesterday: ")
@@ -125,8 +125,8 @@ if input_date != 'y':
 			check_date[2] = int(start_date.year)
 
 		# We cannot end in future years from now, since the database records end yesterday:
-		if check_date[2] > int(x.year):
-			check_date[2] = int(x.year)
+		if check_date[2] > int(yesterday_date.year):
+			check_date[2] = int(yesterday_date.year)
 
 		# There are no more months in a year than 12:
 		if check_date[1] > 12:
@@ -137,8 +137,8 @@ if input_date != 'y':
 			check_date[1] = 1
 
 		# We cannot end in future months from now, since the database records end yesterday:
-		if check_date[2] == int(x.year) and check_date[1] > int(x.month):
-			check_date[1] = int(x.month)
+		if check_date[2] == int(yesterday_date.year) and check_date[1] > int(yesterday_date.month):
+			check_date[1] = int(yesterday_date.month)
 
 		# There is no "zero" or "negative" day:
 		if check_date[0] < 1:
@@ -164,8 +164,8 @@ if input_date != 'y':
 				check_date[0] = 30
 
 		# We cannot end today or in the future, because the last xml DB file exists for yesterday:
-		if check_date[2] == int(x.year) and check_date[1] == int(x.month) and check_date[0] > int(x.day):
-			check_date[0] = int(x.day)
+		if check_date[2] == int(yesterday_date.year) and check_date[1] == int(yesterday_date.month) and check_date[0] > int(yesterday_date.day):
+			check_date[0] = int(yesterday_date.day)
 
 		end_date = datetime.date(check_date[2], check_date[1], check_date[0])
 
