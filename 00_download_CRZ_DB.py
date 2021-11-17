@@ -73,7 +73,7 @@ else:
 # Gather and check ending date:
 input_date = input("Please enter ending date in the form 'd.m.yyyy' or 'y' for yesterday: ")
 
-if input_date != 'y':
+if input_date.lower() != 'y':
 	end_date=validateDate(input_date,yeseterday_date)
 
 	print(f"Using ending date: {end_date}")
