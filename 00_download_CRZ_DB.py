@@ -3,7 +3,7 @@
 #                                to enter the date of the last record, |
 #                                as well as specify starting date.     |
 # -------------------------------------------------------------------- |
-# Packages needed :  urllib, zipfile, dateutil, datetime, os, re,      |
+# Packages needed :  urllib, zipfile, dateutil, datetime, os,          |
 #                    proxyhandler (own module enabling proxy support)  |
 # -------------------------------------------------------------------- |
 # Crawler for downloading and categorizing dump from CRZ GOV database  |
@@ -14,7 +14,6 @@ import urllib.request
 import zipfile
 import os
 import proxyhandler
-import re
 import datetime
 # from datetime import date
 from dateutil.rrule import rrule, DAILY
@@ -23,22 +22,33 @@ start_date = datetime.date(2011, 1, 1)
 
 dates = []
 
-
-# Function returns whether the passed year value is a leap year or not.
-def is_leap_year(year):
-	if (year % 4) == 0:
-		if (year % 100) == 0:
-			if (year % 400) == 0:
-				return True
-			else:
-				return False
-
-
 # Check today's date for reference and calculate yesterday's date (last valid date for database xml file):
-yesterday_date = datetime.datetime.now() - datetime.timedelta(days=1)
+yeseterday_date = datetime.datetime.now() - datetime.timedelta(days=1)
+yeseterday_date = yeseterday_date.date()
 
 # Default ending date is yesterday:
-end_date = yesterday_date
+end_date = yeseterday_date
+
+def validateDate(date_str : str ,default : datetime.date):
+	try:
+		# Try to convert date to datetime format
+		check_date=datetime.datetime.strptime(date_str,"%d.%m.%Y").date()
+	except:
+		# Reverting back to default, if some gibberish was entered:
+		print("Invalid input, using default date")
+		check_date= default
+	
+	# We need to start in 2011 or later:
+	if check_date < start_date:
+		check_date=start_date
+	
+	# We cannot start in future:
+	if check_date > yeseterday_date:
+		check_date=yeseterday_date
+	
+	return check_date
+
+
 
 print("*** Downloading DB of contracts from crz.gov.sk. ***")
 print('')
@@ -46,64 +56,11 @@ print('')
 # Gather and check starting date:
 input_date = input("Please enter starting date in the form 'd.m.yyyy', 'b' for beginning of DB records, or 'y' for yesterday: ")
 
-if input_date.lower() != 'y' and input_date.lower() != 'b':
-	check_date = [int(s) for s in re.findall(r'\b\d+\b', input_date)]
+if input_date.lower() not in ['y','b']:
+	start_date=validateDate(input_date,start_date)
 
-	if len(check_date) == 3:
-		# We need to start in 2011 or later:
-		if check_date[2] < int(start_date.year):
-			check_date[2] = int(start_date.year)
+	print(f"Using starting date: {start_date}")
 
-		# We cannot start in future years:
-		if check_date[2] > int(yesterday_date.year):
-			check_date[2] = int(yesterday_date.year)
-
-		# There are no more months in a year than 12:
-		if check_date[1] > 12:
-			check_date[1] = 12
-
-		# There is no "zero" or "negative" month:
-		if check_date[1] < 1:
-			check_date[1] = 1
-
-		# We cannot start in future months:
-		if check_date[2] == int(yesterday_date.year) and check_date[1] > int(yesterday_date.month):
-			check_date[1] = int(yesterday_date.month)
-
-		# There is no "zero" or "negative" day:b
-		if check_date[0] < 1:
-			check_date[0] = 1
-
-		# There are no more days in a month than 31:
-		if check_date[0] > 31:
-			check_date[0] = 31
-
-		# In february, there are either 28 or 29 days depending on whether the year is or is not leap:
-		if check_date[1] == 2:
-			if is_leap_year(check_date[2]) is True:
-				if check_date[0] > 29:
-					check_date[0] = 29
-
-			else:
-				if check_date[0] > 28:
-					check_date[0] = 28
-
-		# In April, June, September and November, there are only 30 days in a month:
-		if check_date[1] == 4 or check_date[1] == 6 or check_date[1] == 9 or check_date[1] == 11:
-			if check_date[0] > 30:
-				check_date[0] = 30
-
-		# We cannot start today or in the future, because the last xml DB file exists for yesterday:
-		if check_date[2] == int(yesterday_date.year) and check_date[1] == int(yesterday_date.month) and check_date[0] > int(yesterday_date.day):
-			check_date[0] = int(yesterday_date.day)
-
-		start_date = datetime.date(check_date[2], check_date[1], check_date[0])
-
-		print(f"Using starting date: {start_date}")
-
-	# Reverting back to default, if some gibberish was entered:
-	else:
-		print("Invalid input, using default starting date: the 1st of January, 2011.")
 
 # We decided to start at the very beginning of record keeping:
 elif input_date.lower() == 'b':
@@ -111,69 +68,15 @@ elif input_date.lower() == 'b':
 
 # We decided to start yesterday:
 else:
-	start_date = yesterday_date
+	start_date = yeseterday_date
 
 # Gather and check ending date:
 input_date = input("Please enter ending date in the form 'd.m.yyyy' or 'y' for yesterday: ")
 
 if input_date != 'y':
-	check_date = [int(s) for s in re.findall(r'\b\d+\b', input_date)]
+	end_date=validateDate(input_date,yeseterday_date)
 
-	if len(check_date) == 3:
-		# We need to end in 2011 or later (we cannot end before starting):
-		if check_date[2] < int(start_date.year):
-			check_date[2] = int(start_date.year)
-
-		# We cannot end in future years from now, since the database records end yesterday:
-		if check_date[2] > int(yesterday_date.year):
-			check_date[2] = int(yesterday_date.year)
-
-		# There are no more months in a year than 12:
-		if check_date[1] > 12:
-			check_date[1] = 12
-
-		# There is no "zero" or "negative" month:
-		if check_date[1] < 1:
-			check_date[1] = 1
-
-		# We cannot end in future months from now, since the database records end yesterday:
-		if check_date[2] == int(yesterday_date.year) and check_date[1] > int(yesterday_date.month):
-			check_date[1] = int(yesterday_date.month)
-
-		# There is no "zero" or "negative" day:
-		if check_date[0] < 1:
-			check_date[0] = 1
-
-		# There are no more days in a month than 31:
-		if check_date[0] > 31:
-			check_date[0] = 31
-
-		# In february, there are either 28 or 29 days depending on whether the year is or is not leap:
-		if check_date[1] == 2:
-			if is_leap_year(check_date[2]) is True:
-				if check_date[0] > 29:
-					check_date[0] = 29
-
-			else:
-				if check_date[0] > 28:
-					check_date[0] = 28
-
-		# In April, June, September and November, there are only 30 days in a month:
-		if check_date[1] == 4 or check_date[1] == 6 or check_date[1] == 9 or check_date[1] == 11:
-			if check_date[0] > 30:
-				check_date[0] = 30
-
-		# We cannot end today or in the future, because the last xml DB file exists for yesterday:
-		if check_date[2] == int(yesterday_date.year) and check_date[1] == int(yesterday_date.month) and check_date[0] > int(yesterday_date.day):
-			check_date[0] = int(yesterday_date.day)
-
-		end_date = datetime.date(check_date[2], check_date[1], check_date[0])
-
-		print(f"Using ending date: {end_date}")
-
-	# Reverting back to default, if some gibberish was entered:
-	else:
-		print("Invalid input, using yesterday as default ending date.")
+	print(f"Using ending date: {end_date}")
 
 
 for dt in rrule(DAILY, dtstart=start_date, until=end_date):
