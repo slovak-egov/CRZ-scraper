@@ -106,7 +106,7 @@ if input_date.lower() != 'y' and input_date.lower() != 'b':
 		print("Invalid input, using default starting date: the 1st of January, 2011.")
 
 # We decided to start at the very beginning of record keeping:
-elif input_date == 'b' or input_date == 'B':
+elif input_date.lower() == 'b':
 	print("Using the beginning of record keeping as the starting date: the 1st of January, 2011.")
 
 # We decided to start yesterday:
