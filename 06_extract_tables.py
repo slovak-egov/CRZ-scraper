@@ -23,7 +23,7 @@ from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfinterp import resolve1
 
 # Destination:
-working_dir = os.getcwd()+'/contracts_mandayrates/'
+working_dir = os.getcwd()+'/contracts_relevant/'
 
 # Open tagged spreadsheet and read information, sorted
 DB_clean_tagged = pd.read_csv('CRZ_DB_clean_text_tagged.csv', delimiter='|', dtype=str)
@@ -131,8 +131,22 @@ if 'Pocet_stran' not in DB_clean_tagged.columns:
 					# There are files, which are essentially PDF files, but they were uploaded
 					# to CRZ without any extension. Some PDF processing tools have problem
 					# with that, so we make it right:
+					# If the file is not a PDF, we have to proceed accordingly.
+					# 1. Check if it is not a .docx or a .doc file, which can be read
+					# 2. If there is no extension, those are PDFs, but the extension
+					#    is missing.
 					if f[-4:].casefold() != '.pdf':
-						if f[-4] != '.':
+						if f[-5:].casefold() == '.docx':
+							print(f"{f}: This is a MS Word XML format file. We need to convert it to pdf first...")
+							os.system('ebook-convert ' + f + ' ' + f.rstrip(".docx") + '.pdf > /dev/null')
+							contract = f.rstrip(".docx") + ".pdf"
+
+						elif f[-4:].casefold() == '.doc':
+							print(f"{f}: This is a MS Word binary file. We need to convert it to pdf first...")
+							os.system('unoconv ' + f)
+							f = f.rstrip(".docx") + ".pdf"
+
+						else:
 							print(f"{f}: invalid extension, changing to {f}.pdf...")
 							os.system('cp ' + contract_dir + f + ' ' + contract_dir + f + '.pdf')
 							f += '.pdf'

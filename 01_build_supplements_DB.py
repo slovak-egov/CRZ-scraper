@@ -12,6 +12,8 @@ import requests
 import lxml.html as lh
 import pandas as pd
 import re
+import time
+from functools import wraps
 
 import proxyhandler
 
@@ -19,6 +21,55 @@ proxy_present = False
 
 find_price_dot = re.compile(r'\d+\.\d+')
 find_price_without_dot = re.compile(r'\d+')
+
+
+# Decorator "retry" downloaded from: http://www.saltycrane.com/blog/2009/11/trying-out-retry-decorator-python/
+# Original from: http://wiki.python.org/moin/PythonDecoratorLibrary#Retry
+#
+# Reason:
+# Connection to crz.gov.sk seemed to have been randomly interrupted or dropped, respectively. That fired Timeout error,
+# which belongs to ConnectionError class in requests. Despite attempts to catch the error (some of them successful),
+# it would eventually crash, so I decided to google up some working solutions. This is one of them.
+def retry(ExceptionToCheck, tries=10, delay=3, backoff=2, logger=None):
+    # Retry calling the decorated function using an exponential backoff.
+    #
+    # http://www.saltycrane.com/blog/2009/11/trying-out-retry-decorator-python/
+    # original from: http://wiki.python.org/moin/PythonDecoratorLibrary#Retry
+    #
+    # :param ExceptionToCheck: the exception to check. may be a tuple of
+    #     exceptions to check
+    # :type ExceptionToCheck: Exception or tuple
+    # :param tries: number of times to try (not retry) before giving up
+    # :type tries: int
+    # :param delay: initial delay between retries in seconds
+    # :type delay: int
+    # :param backoff: backoff multiplier e.g. value of 2 will double the delay
+    #     each retry
+    # :type backoff: int
+    # :param logger: logger to use. If None, print
+    # :type logger: logging.Logger instance
+    def deco_retry(f):
+
+        @wraps(f)
+        def f_retry(*args, **kwargs):
+            mtries, mdelay = tries, delay
+            while mtries > 1:
+                try:
+                    return f(*args, **kwargs)
+                except ExceptionToCheck as e:
+                    msg = "%s, retrying in %d seconds..." % (str(e), mdelay)
+                    if logger:
+                        logger.warning(msg)
+                    else:
+                        print('\n' + msg)
+                    time.sleep(mdelay)
+                    mtries -= 1
+                    mdelay *= backoff
+            return f(*args, **kwargs)
+
+        return f_retry  # true decorator
+
+    return deco_retry
 
 
 def find_price(string):
@@ -29,14 +80,14 @@ def find_price(string):
 
 
 find_ID = re.compile(r'\d+')
-header  = ['Nazov','ID_supplement','ID_zmluva','Inner-ID','Objednavatel','Dodavatel','Datum_podpisu','Datum_platnosti','Datum_ucinnosti','Poznamka','Prilohy']
+header = ['Nazov','ID_supplement','ID_zmluva','Inner-ID','Objednavatel','Dodavatel','Datum_podpisu','Datum_platnosti','Datum_ucinnosti','Poznamka','Prilohy']
 
-fo  = open('IDs.txt','r')
+fo = open('IDs.txt', 'r')
 IDs = fo.readlines()
 fo.close()
 
 row_list = []
-print('Going to build supplemental agreements DB of',len(IDs))
+print('Going to build supplemental agreements DB of', len(IDs))
 
 proxyname1, proxyname2 = proxyhandler.query_proxy()
 
@@ -57,9 +108,18 @@ for i, ID in enumerate(IDs):
 		url = 'https://www.crz.gov.sk/index.php?ID='+ID+'&l=sk'
 
 		if proxy_present is True:
-			page = requests.get(url, proxies=proxy)
+			# Instead of urllib, we use requests.get to download files. Thanks to random connection dropouts, the function is treated with a decorator.
+			@retry(requests.ConnectionError, tries=10, delay=3, backoff=2)
+			def urlopen_with_retry():
+				return requests.get(url, allow_redirects=True, proxies=proxy)
+
 		else:
-			page = requests.get(url)
+			# Instead of urllib, we use requests.get to download files. Thanks to random connection dropouts, the function is treated with a decorator.
+			@retry(requests.ConnectionError, tries=10, delay=3, backoff=2)
+			def urlopen_with_retry():
+				return requests.get(url, allow_redirects=True)
+
+		page = urlopen_with_retry()
 
 		doc = lh.fromstring(page.content)
 
@@ -113,7 +173,9 @@ for i, ID in enumerate(IDs):
 		data = [supplement_name, ID, contract_ID, supplement_number, supplement_purchaser, supplement_supplier, date_signed, date_validity, date_efficiency, supplement_note, supplement_attachments]
 		row_list.append(dict((label,data[i]) for i, label in enumerate(header)))
 
-	except:
+	except Exception as e:
+		# print(repr(e))
+		# input("Press any key to continue")
 		pass
 
 	if i % 50 == 0:

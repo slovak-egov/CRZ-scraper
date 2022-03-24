@@ -188,6 +188,11 @@ def url_is_alive(url):
 #                           variable, which counts number of files for each instance
 #                           of the function and is returned after processing.
 #
+#   proxy_on =              A flag that internet connection should be routed via proxy server.
+#
+#   proxy_object =          Reference to the object containing proxy information. Used only
+#                           if proxy_on is True.
+#
 #   retries As Integer =    Maximum number of retries when error returned after trying to open
 #                           an url. when nothing is entered, value of 20 is used.
 #                           Error is raised after 4 initial attempts, which means that
@@ -219,7 +224,7 @@ def url_is_alive(url):
 #                                       attachments_processed = -1
 #                                       error = human readable error message.
 #
-def contract_download(links_list, cid, target_path_prefix, att_state, retries=20):
+def contract_download(links_list, cid, target_path_prefix, att_state, proxy_on, proxy_object, retries=20):
     attachments_processed = 0
     error = ""
     r = 0
@@ -241,10 +246,26 @@ def contract_download(links_list, cid, target_path_prefix, att_state, retries=20
                       f'./{target_path_prefix.split("/")[-2]}/{target_path_prefix.split("/")[-1]}{cid}/{operstr[len(operstr) - 1]}', end="")
                 time.sleep(0.01)
 
-                # Thanks to random connection dropouts, the function is treated with a decorator.
-                @retry(requests.ConnectionError, tries=4, delay=3, backoff=2)
-                def url_gethead():
-                    return requests.head(dl_link, allow_redirects=True)
+                if proxy_on is True:
+                    # checking url with "retry" decorator, because the connection is dropped randomly.
+                    @retry(requests.ConnectionError, tries=4, delay=3, backoff=2)
+                    def urlopen_with_retry():
+                        return requests.get(url, allow_redirects=True, proxies=proxy_object)
+                else:
+                    # checking url with "retry" decorator, because the connection is dropped randomly.
+                    @retry(requests.ConnectionError, tries=4, delay=3, backoff=2)
+                    def urlopen_with_retry():
+                        return requests.get(url, allow_redirects=True)
+
+                if proxy_on is True:
+                    # Thanks to random connection dropouts, the function is treated with a decorator.
+                    @retry(requests.ConnectionError, tries=4, delay=3, backoff=2)
+                    def url_gethead():
+                        return requests.head(dl_link, allow_redirects=True, proxies=proxy_object)
+                else:
+                    @retry(requests.ConnectionError, tries=4, delay=3, backoff=2)
+                    def url_gethead():
+                        return requests.head(dl_link, allow_redirects=True)
 
                 # Instead of urllib, we use requests.get to download files. Thanks to random connection dropouts, the function is treated with a decorator.
                 @retry(requests.ConnectionError, tries=4, delay=3, backoff=2)
@@ -681,7 +702,7 @@ while i < number_of_contracts:
         if no_link is False:
             # If any of the error correcting mechanisms above were successful, we can proceed with download, which still
             # might fail:
-            status, err = contract_download(check_links, download_db[i][0], working_dir, att)
+            status, err = contract_download(check_links, download_db[i][0], working_dir, att, proxy_present, proxy)
 
             # The download was successful:
             if status > -1:

@@ -33,6 +33,8 @@ import requests
 import lxml.html as lh
 import re
 import proxyhandler
+import time
+from functools import wraps
 
 proxy_present = False
 
@@ -114,19 +116,28 @@ find_ID = re.compile(r'\d+')
 def find_max_pages(stage, last=0, total_runs=1, proxyserver=None):
     i = last
 
-    while True:
+    while True and total_runs < 200000:
         print("\rAttempt no. " + str(total_runs), end="")
 
         test_url = "https://crz.gov.sk/dodatky-k-zmluvam/?page=" + str(i)
 
-        if proxyserver is None:
-            page = requests.get(test_url)
+        if proxyserver is not None:
+            # Instead of urllib, we use requests.get to download files. Thanks to random connection dropouts, the function is treated with a decorator.
+            @retry(requests.ConnectionError, tries=10, delay=3, backoff=2)
+            def urlopen_with_retry2():
+                return requests.get(test_url, allow_redirects=True, proxies=proxy)
+
         else:
-            page = requests.get(test_url, proxies=proxyserver)
+            # Instead of urllib, we use requests.get to download files. Thanks to random connection dropouts, the function is treated with a decorator.
+            @retry(requests.ConnectionError, tries=10, delay=3, backoff=2)
+            def urlopen_with_retry2():
+                return requests.get(test_url, allow_redirects=True)
 
-        doc = lh.fromstring(page.content)
+        pg = urlopen_with_retry2()
 
-        found = len(doc.find_class('area area7'))
+        dc = lh.fromstring(pg.content)
+
+        found = len(dc.find_class('area area7'))
 
         if found == 0:
             if stage < 4:
@@ -168,6 +179,54 @@ def find_max_pages(stage, last=0, total_runs=1, proxyserver=None):
 
 # end find_max_pages
 
+
+# Decorator "retry" downloaded from: http://www.saltycrane.com/blog/2009/11/trying-out-retry-decorator-python/
+# Original from: http://wiki.python.org/moin/PythonDecoratorLibrary#Retry
+#
+# Reason:
+# Connection to crz.gov.sk seemed to have been randomly interrupted or dropped, respectively. That fired Timeout error,
+# which belongs to ConnectionError class in requests. Despite attempts to catch the error (some of them successful),
+# it would eventually crash, so I decided to google up some working solutions. This is one of them.
+def retry(ExceptionToCheck, tries=10, delay=3, backoff=2, logger=None):
+    # Retry calling the decorated function using an exponential backoff.
+    #
+    # http://www.saltycrane.com/blog/2009/11/trying-out-retry-decorator-python/
+    # original from: http://wiki.python.org/moin/PythonDecoratorLibrary#Retry
+    #
+    # :param ExceptionToCheck: the exception to check. may be a tuple of
+    #     exceptions to check
+    # :type ExceptionToCheck: Exception or tuple
+    # :param tries: number of times to try (not retry) before giving up
+    # :type tries: int
+    # :param delay: initial delay between retries in seconds
+    # :type delay: int
+    # :param backoff: backoff multiplier e.g. value of 2 will double the delay
+    #     each retry
+    # :type backoff: int
+    # :param logger: logger to use. If None, print
+    # :type logger: logging.Logger instance
+    def deco_retry(f):
+
+        @wraps(f)
+        def f_retry(*args, **kwargs):
+            mtries, mdelay = tries, delay
+            while mtries > 1:
+                try:
+                    return f(*args, **kwargs)
+                except ExceptionToCheck as e:
+                    msg = "%s, retrying in %d seconds..." % (str(e), mdelay)
+                    if logger:
+                        logger.warning(msg)
+                    else:
+                        print('\n' + msg)
+                    time.sleep(mdelay)
+                    mtries -= 1
+                    mdelay *= backoff
+            return f(*args, **kwargs)
+
+        return f_retry  # true decorator
+
+    return deco_retry
 
 print("Starting search for the last subpage of total supplement list by variable step approximation...")
 
@@ -224,60 +283,69 @@ else:
         page_ID = 0
 
 if proceed:
-        page_ID = int(start_ID)
+    page_ID = int(start_ID)
 
-        while(page_ID <= last_page - 1):
-            # for page_ID in range(int(start_ID), last_page):
-            try:
-                url = 'https://crz.gov.sk/dodatky-k-zmluvam/?page=' + str(page_ID)
+    while page_ID <= last_page - 1:
+        # for page_ID in range(int(start_ID), last_page):
+        try:
+            url = 'https://crz.gov.sk/dodatky-k-zmluvam/?page=' + str(page_ID)
 
-                print(f'Processing subpage {page_ID} of {last_page - 1}...')
+            print(f'Processing subpage {page_ID} of {last_page - 1}...')
+
+            if proxy_present is True:
+                # Instead of urllib, we use requests.get to download files. Thanks to random connection dropouts, the function is treated with a decorator.
+                @retry(requests.ConnectionError, tries=10, delay=3, backoff=2)
+                def urlopen_with_retry():
+                    return requests.get(url, allow_redirects=True, proxies=proxy)
+
+            else:
+                # Instead of urllib, we use requests.get to download files. Thanks to random connection dropouts, the function is treated with a decorator.
+                @retry(requests.ConnectionError, tries=10, delay=3, backoff=2)
+                def urlopen_with_retry():
+                    return requests.get(url, allow_redirects=True)
+
+            page = urlopen_with_retry()
+
+            doc = lh.fromstring(page.content)
+
+            tr_elements = doc.xpath('//tr')
+
+            supplements = [supplement for supplement in tr_elements if len(supplement) == 5]
+
+            IDs = [find_ID.findall(supplement[1][0].attrib['href'])[0] for supplement in supplements[1:] if supplement[1][0].attrib['href'] != ""]
+
+            operstring = '\n'.join(IDs)
+
+            f = open('IDs.txt', 'a')
+            f.write(operstring + '\n')
+            f.close()
+
+            supplements_ID = supplements_ID + IDs
+
+            if page_ID == last_page - 1000:
+                print("1000 subpages to end, forcing refresh of total subpages")
 
                 if proxy_present is True:
-                    page = requests.get(url, proxies=proxy)
+                    last_page, total = find_max_pages(0, proxyserver = proxy)
                 else:
-                    page = requests.get(url)
+                    last_page, total = find_max_pages(0)
 
-                doc = lh.fromstring(page.content)
+                print(f'\n\rThe last subpage is: {last_page - 1}, found after {total} attempts.')
+            # end if
 
-                tr_elements = doc.xpath('//tr')
+            # Resetting error_counter if current subpage went on successful:
+            error_counter = 0
+            page_ID += 1
 
-                supplements = [supplement for supplement in tr_elements if len(supplement) == 5]
+        except Exception as e:
+            print(f'{repr(e)}, retrying...')
 
-                IDs = [find_ID.findall(supplement[1][0].attrib['href'])[0] for supplement in supplements[1:] if supplement[1][0].attrib['href'] != ""]
+            # Only if loop crashes 100 times in a row (without a single successful one),
+            # the execution is terminated.
+            error_counter += 1
 
-                operstring = '\n'.join(IDs)
-
-                f = open('IDs.txt', 'a')
-                f.write(operstring + '\n')
-                f.close()
-
-                supplements_ID = supplements_ID + IDs
-
-                if page_ID == last_page - 1000:
-                    print("1000 subpages to end, forcing refresh of total subpages")
-
-                    if proxy_present is True:
-                        last_page, total = find_max_pages(0, proxyserver = proxy)
-                    else:
-                        last_page, total = find_max_pages(0)
-
-                    print(f'\n\rThe last subpage is: {last_page - 1}, found after {total} attempts.')
-                # end if
-
-                # Resetting error_counter if current subpage went on successful:
-                error_counter = 0
-                page_ID += 1
-
-            except Exception as e:
-                print(f'{repr(e)}, retrying...')
-
-                # Only if loop crashes 100 times in a row (without a single successful one),
-                # the execution is terminated.
-                error_counter += 1
-
-                if error_counter < 100:
-                    pass
-                else:
-                    print("Retried for 100 times without success, terminating...")
-                    break
+            if error_counter < 20:
+                pass
+            else:
+                print("Retried for 200 times without success, terminating...")
+                break

@@ -14,13 +14,13 @@ import os
 import pandas as pd
 
 source_dir = os.getcwd()+'/contracts_text/'
-direction_dir = os.getcwd()+'/contracts_mandayrates/'
+direction_dir = os.getcwd()+'/contracts_relevant/'
 
-if not os.path.exists('contracts_mandayrates'):
-	os.makedirs('contracts_mandayrates')
+if not os.path.exists('contracts_relevant'):
+	os.makedirs('contracts_relevant')
 
 print("Loading database...")
-DB_clean_tagged = pd.read_csv('DB_clean_text_tagged.csv', delimiter='|', dtype=str)
+DB_clean_tagged = pd.read_csv('CRZ_DB_clean_text_tagged.csv', delimiter='|', dtype=str)
 total = DB_clean_tagged.shape[0]
 
 for index, row in DB_clean_tagged.iterrows():

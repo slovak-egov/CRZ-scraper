@@ -1,5 +1,5 @@
 # Matej Badin    | UHP  | 2019                                         |
-# Marian Tihanyi | IDRP | 2021 (update, improvements)                  |
+# Marian Tihanyi | IDRP | 2021 (update, improvements, port to Linux)   |
 # -------------------------------------------------------------------- |
 # Packages needed :  re, os, pandas, ast                               |
 # -------------------------------------------------------------------- |
@@ -76,8 +76,8 @@ for line in lines:
 
 # Prepare header for export
 header_metadata = ['Nazov','ID','Inner-ID','Objednavatel_ICO','Objednavatel','Objednavatel_adresa','Dodavatel_ICO','Dodavatel','Dodavatel_adresa',
-				   'Datum_zverejnenia','Datum_podpisu','Datum_platnosti','Datum_ucinnosti','Posledna_zmena','Cena_konecna','Cena_podpisana','Rezort','Typ',
-				   'Prilohy_IDs','Prilohy_nazvy','Prilohy_odkazy','Prilohy_velkosti','Prilohy_datum']
+					'Datum_zverejnenia','Datum_podpisu','Datum_platnosti','Datum_ucinnosti','Posledna_zmena','Cena_konecna','Cena_podpisana','Rezort','Typ',
+					'Prilohy_IDs','Prilohy_nazvy','Prilohy_odkazy','Prilohy_velkosti','Prilohy_datum']
 
 header_sum_cat = ['Výskyty']
 header_categories = [category[0] for category in categories]
@@ -119,6 +119,7 @@ for contract, filelist in contracts_txt.items():
 			category[3] += category[2][j]
 
 	# Extract metadata and join it with counted hits
+	# row = DB_clean.loc[DB_clean['ID'] == int(extract_ID.findall(contracts[contract])[0])]
 	row = DB_clean.loc[DB_clean['ID'] == contract]
 
 	meta_data = [row.iloc[0, j] for j in range(1, 19)]
@@ -198,8 +199,8 @@ delete_rows = []
 
 for index, row in DB_clean_tagged.iterrows():
 	# if str(row['Pozícia']).isnumeric() and str(row['Popis práce']).isnumeric():
-	if float(row['Pozícia']) == 0 and float(row['Popis práce']) == 0:
-		delete_rows.append(index)
+	#if float(row['Pozícia']) == 0 and float(row['Popis práce']) == 0:
+	#	delete_rows.append(index)
 
 	# if str(row['Výskyty']).isnumeric():
 	if float(row['Výskyty']) == 0:

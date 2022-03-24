@@ -13,6 +13,7 @@
 
 import pandas as pd
 import re
+import math
 
 
 # Recursive function date_is_equal_or_later()
@@ -88,20 +89,16 @@ def date_is_equal_or_later(date1, date2, level):
 		return None
 
 
-print("Loading databases (contracts and filter), please wait...")
+print("Loading contracts database, please wait...")
 
 DB = pd.read_csv('CRZ_DB_with_supplements.csv', delimiter='|', dtype=str)
 print('DB of contracts loaded to memory.')
 print('Filtering relevant contracts')
 number_of_contracts = DB.shape[0]
 
-# The companies.csv file contains data about a narrow list of companies
-# and their CINs for CIN-based filtering:
-companies = pd.read_csv('companies.csv', delimiter='|', dtype=str)
-companies = companies['ICO'].tolist()
-companies = [str(x) for x in companies]
 remove = []
 control_db = []
+discard_counter = 0
 
 j = 0
 input_ok = False
@@ -149,7 +146,39 @@ while input_ok is False:
 	else:
 		print("Invalid input. Try again.")
 
+input_ok = False
+
+while input_ok is False:
+	print("")
+	print("Please select one of the following options:")
+	print("1: Filter by suppliers' CIN only (companies.csv)")
+	print("2: Filter by state administration institution only (resorts.csv)")
+	print("3: Filter by suppliers' CIN and by state administration institusion (both companies.csv and resorts.csv)")
+	print("4: Do not filter by either supplier or resort.")
+	query = input("Your choice: ")
+
+	if query.isnumeric():
+		if 1 <= int(query) <= 4:
+			input_ok = True
+		else:
+			print("The number must be between 1 and 4.")
+	else:
+		print("The choice must be a number.")
+
 input("Press any key to start the process.")
+
+# The companies.csv file contains data about a narrow list of companies
+# and their CINs for CIN-based filtering:
+if int(query) == 1 or int(query) == 3:
+	companies = pd.read_csv('companies.csv', delimiter='|', dtype=str)
+	companies = companies['ICO'].tolist()
+	companies = [str(x) for x in companies]
+
+if int(query) == 2 or int(query) == 3:
+	resorts = pd.read_csv('resorts.csv', delimiter='|', dtype=str)
+	resorts = resorts.to_dict(orient="list")
+
+key_count = 0
 
 # Scan the dumped DB and remove contracts, in which the supplier does not match any CIN from the provided list (companies.csv):
 for i in range(0, number_of_contracts):
@@ -157,8 +186,8 @@ for i in range(0, number_of_contracts):
 	tosslevel = 0
 
 	print(
-		f"\r{round(percentage, 1):>5}% completed. Item no: {i:>10}, saved: {j:>10} of {number_of_contracts:>10}, ID: {str(DB.iloc[i, 3]):>10},"
-		f"name: {str(DB.iloc[i, 2]) if len(str(DB.iloc[i, 2])) < 50 else str(DB.iloc[i, 2])[:46] + '...'}".ljust(146), end=" -> "
+		f"\r{round(percentage, 1):>5}% completed. Item no: {i:>10}, saved: {j:>10} and discarded {discard_counter:>10} of {number_of_contracts:>10}, ID: {str(DB.iloc[i, 3]):>10},"
+		f"name: {str(DB.iloc[i, 2]) if len(str(DB.iloc[i, 2])) < 50 else str(DB.iloc[i, 2])[:46] + '...'}".ljust(171), end=" -> "
 	)
 
 	# These fields are extracted mainly for the purpose of further filtering or changing output format:
@@ -166,17 +195,42 @@ for i in range(0, number_of_contracts):
 	price = str(DB.iloc[i, 17])
 	publishing_date = str(DB.iloc[i, 11])
 
-	# If CIN is not in companies database, remove the record:
-	if not(str(DB.iloc[i, 8]).replace(" ","") in companies):
-		remove.append(i)
-		tosslevel = 1
+	if 1 <= int(query) <= 3:
+		if int(query) % 2 > 0:
+			# If CIN is not in companies database, remove the record:
+			if not(str(DB.iloc[i, 8]).replace(" ","") in companies):
+				remove.append(i)
+				tosslevel = 1
 
-	elif attachments == '[]' or attachments == '' or 'https://' not in attachments:
-		remove.append(i)
-		tosslevel = 2
+		if 2 <= int(query) <= 3:
+			key_count = 0
+			found = False
+
+			for key in resorts.keys():
+				for name in resorts[key]:
+					if not str(name) == "nan":
+						if name.upper().replace(" ","") in str(DB.iloc[i, 6]).upper().replace(" ",""):
+							found = True
+							break
+
+				if found is False:
+					if key_count < 2:
+						key_count += 1
+					else:
+						remove.append(i)
+						tosslevel = -1
+						key_count = 0
+						break
+				else:
+					break
+
+
+		if attachments == '[]' or attachments == '' or 'https://' not in attachments:
+			remove.append(i)
+			tosslevel = 2
 
 	# Here we also check minimum financial volume and delete duplicates:
-	else:
+	if tosslevel == 0:
 		# Check for minimum financial volume:
 		try:
 			if float(price) < contract_vol:
@@ -222,8 +276,11 @@ for i in range(0, number_of_contracts):
 			if type(DB.iloc[i, k]) == str:
 				DB.iloc[i, k] = DB.iloc[i, k].strip().replace('\n', ' ')
 
+	elif tosslevel == -1:
+		print("discarded for non-matching resort.", end="")
+
 	elif tosslevel == 1:
-		print("discarded for non-matching CIN.", end="")
+		print("discarded for non-matching supplier CIN.")
 
 	elif tosslevel == 2:
 		print("discarded for nonexistent attachments.")
@@ -237,9 +294,11 @@ for i in range(0, number_of_contracts):
 	elif tosslevel == 5:
 		print("discarded for being a duplicate of another record.")
 
+	if tosslevel != 0:
+		discard_counter += 1
 
 print('')
-print('Found relevant: ', number_of_contracts-len(remove),' out of ',number_of_contracts)
+print('Found relevant: ', number_of_contracts - discard_counter,' out of ',number_of_contracts)
 
 # Clean irrelevant
 DB_clean = DB.drop(DB.index[remove])

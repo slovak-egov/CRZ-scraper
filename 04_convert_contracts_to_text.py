@@ -10,6 +10,12 @@
 # 	 Debian flavour: # apt install tesseract-ocr-all					|
 # 2. poppler-utils														|
 # 	 Debian flavour: # apt install poppler-utils						|
+# 3. calibre															|
+#	 Uses ebook-convert for conversion of docx to pdf.					|
+#    Debian flavour: # apt install calibre calibre-bin                  |
+# 4. unoconv, libreoffice												|
+#    Used for conversion of binary ms word .doc format to pdf.			|
+#    Debian flavour: # apt install unoconv <libreoffice_packages>	    |
 # --------------------------------------------------------------------  |
 # Parsing downloaded data from CRZ GOV obtained by download_dump script.|
 # Extracting text from PDF files - either directly, if possible, or     |
@@ -35,6 +41,7 @@ import subprocess
 control_db = []
 contracts = []
 process_level = 0
+ms_word = 0
 
 find_number = re.compile(r'\d+')
 FNULL = open(os.devnull, 'w')
@@ -110,9 +117,24 @@ answer = input("Your choice: ")
 if answer == '1' or answer == '2' or answer == '3':
 	process_level = int(answer)
 
+print(f"Totally {number_of_contracts} available.")
+
 if process_level > 0:
+	start = input(f"Please enter starting number: ")
+
+	proceed = False
+
+	if start.isnumeric() is True:
+		while proceed is False:
+			if 0 <= int(start) <= number_of_contracts:
+				proceed = True
+			else:
+				print(f"Invalid entry. Please enter number between 0 and {number_of_contracts}.")
+
+	dirpath = os.listdir(raw_dir)  # List all contract dirs, which are IDs
+
 	# Read IDs of contracts, excluding duplicates and contracts not having any attachment files:
-	for i in range(0, number_of_contracts):
+	for i in range(int(start), number_of_contracts):
 		attachments = ast.literal_eval(DB_clean.iloc[i, 20])
 
 		contract_name = str(DB_clean.iloc[i, 1])
@@ -131,8 +153,6 @@ if process_level > 0:
 				control_db.append([])  # Add a new sublist into the control list
 				control_db[j].append(contract_name)  # Add contract name to the sublist
 				control_db[j].append(contract_ID)    # Add ID to the sublist
-
-				dirpath = os.listdir(raw_dir)		 # List all contract dirs, which are IDs
 
 				# If a contract with such ID is downloaded to the disk, we enter
 				# the corresponding directory / folder:
@@ -188,20 +208,30 @@ if process_level > 0:
 						# 6. If particular option is enabled, the text is either directly extracted from the PDF
 						# 	 and saved as TXT file, or the PDF is OCR'd and that text is saved as TXT file.
 						while fcount < total_files:
+							ms_word = 0
+
 							if os.path.isfile(contract_dir + '/' + listed_dir[fcount]):
 								f = listed_dir[fcount]
 
 								print(f"\tProcessing file {fcount + 1} of {total_files}: {f}")
 
-								# There are files, which are essentially PDF files, but were uploaded
-								# to CRZ without any extension. Some PDF processing tools have problem
-								# with that, so we "correct" them by adding PDF extension:
+								# If the file is not a PDF, we have to proceed accordingly.
+								# 1. Check if it is not a .docx or a .doc file, which can be read
+								# 2. If there is no extension, those are PDFs, but the extension
+								#    is missing.
 								if f[-4:].casefold() != '.pdf':
-									if f[-4] != '.':
+									if f[-5:].casefold() == '.docx':
+										ms_word = 1
+
+									elif f[-4:].casefold() == '.doc':
+										ms_word = 2
+
+									else:
 										print(f"\t - {f}: invalid extension, changing to {f}.pdf...")
 
 										os.system('mv ' + contract_dir + '/' + f + ' ' + contract_dir + '/' + f + '.pdf')
 										f += '.pdf'
+
 
 								contracts.append(contract_dir + '/' + f)
 								contract = contracts[k]
@@ -216,6 +246,16 @@ if process_level > 0:
 
 								print("\t - Analysing document...")
 
+								if ms_word == 1:
+									print("\t - This is a MS Word XML format file. We need to convert it to pdf first...")
+									os.system('ebook-convert ' + contract + ' ' + contract.rstrip(".docx") + '.pdf > /dev/null')
+									contract = contract.rstrip(".docx") + ".pdf"
+
+								elif ms_word == 2:
+									print("\t - This is a MS Word binary file. We need to convert it to pdf first...")
+									os.system('unoconv ' + contract)
+									contract = contract.rstrip(".docx") + ".pdf"
+
 								# Take any of the PDF files in the folder and try to convert it to text
 								# not using OCR (but just extracting text from the corresponding fields
 								# of the PDF format).
@@ -223,6 +263,8 @@ if process_level > 0:
 								# https://www.mankier.com/package/poppler-utils
 								# Installation in Debian linux: # apt install poppler-utils
 								os.system('pdftotext -q ' + contract + ' output.txt')
+
+								check_file = 0
 
 								# File containing detected text:
 								fo = open('output.txt', 'r', encoding='utf8')
@@ -247,7 +289,9 @@ if process_level > 0:
 										# Here the original "move" command was replaced with "copy", which does not
 										# destroy original file source. Any possible debug was difficult after
 										# the files have been moved.
-										print("\t - This is a textual document. Direct extraction of text successful.")
+										if ms_word == 0:
+											print("\t - This is a textual document. Direct extraction of text successful.")
+
 										print(f"\t - Saving source document into the target folder as {text_dir}{target_id_dir}/{bare_name}")
 										print(f"\t - Saving generated text document as {text_dir}{target_id_dir}/{bare_name}.txt")
 										os.system('cp ' + contract + ' ' + text_dir + target_id_dir + '/' + bare_name)
@@ -262,7 +306,10 @@ if process_level > 0:
 								# PNG pictures are created from particular PDF pages and OCR processing is applied..
 								else:
 									if process_level == 2 or process_level == 3:
-										print("\t - This is a scanned document, OCR processing required.")
+										if ms_word == 0:
+											print("\t - This is a scanned document, OCR processing required.")
+										else:
+											print("\t - The document does not contain any text, just images. OCR processing required.")
 
 										# If the PDF cannot be processed as textual, it's time to OCR its contents.
 										# First, we convert it to PNG images (count matching total number of pages).
@@ -355,15 +402,21 @@ if process_level > 0:
 									else:
 										print("\t - This is a scanned document. Skipping on user request.")
 
+								if ms_word > 0:
+									os.system('rm ' + contract)
+
 								k += 1
 
 							# fcount works with all items in a directory, e.g. dirs included, hence is outside "if os.path.isfile():"
 							fcount += 1
 					else:
 						print(f"[{percentage:>5}%][t: {textual:>5}/s: {scanned:>5}] Skipping nonexistent contract, no. {i}, ID: {contract_ID}, name: {contract_display_name}")
-					j += 1
+
+					# j += 1
 				else:
 					print("\tNot found.")
+
+				j += 1
 			else:
 				print(f"[{percentage:>5}%][t: {textual:>5}/s: {scanned:>5}] Skipping duplicate contract, no. {i}, ID: {contract_ID}, name: {contract_display_name}")
 		else:
