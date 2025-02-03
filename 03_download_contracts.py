@@ -61,6 +61,7 @@
 # Parsing downloaded data from CRZ GOV obtained by download_dump script |
 
 import os
+import socket
 import urllib.request
 import pandas as pd
 import ast
@@ -69,6 +70,10 @@ import requests
 import lxml.html as lh
 import time
 from functools import wraps
+from requests.exceptions import ConnectTimeout
+from urllib3.exceptions import ReadTimeoutError
+# from urllib.error import URLError
+# from socket import timeout
 
 
 # This is for printing coloured text to the console:
@@ -154,14 +159,32 @@ def retry(ExceptionToCheck, tries=4, delay=3, backoff=2, logger=None):
 # :param url: A URL
 # :rtype: bool
 def url_is_alive(url):
+    socket.setdefaulttimeout(30)
+
     request = urllib.request.Request(url)
+    print(f'Socket timeout is {socket.getdefaulttimeout()} seconds.')
     request.get_method = lambda: 'HEAD'
 
     try:
         urllib.request.urlopen(request)
+        print("Link alive, proceeding to files...")
         return True
+
     except urllib.request.HTTPError:
+        print("URL is unreachable.")
         return False
+        pass
+
+    except socket.timeout or TimeoutError or ReadTimeoutError or socket.error or ConnectionError:
+        print("Timeout reaching the URL.")
+        return False
+        pass
+
+    except urllib.error.URLError as er:
+        if isinstance(er.reason, socket.timeout):
+            print("Timeout reaching the URL.")
+            return False
+            pass
 
 
 # Function contract_download
@@ -248,41 +271,65 @@ def contract_download(links_list, cid, target_path_prefix, att_state, proxy_on, 
 
                 if proxy_on is True:
                     # checking url with "retry" decorator, because the connection is dropped randomly.
-                    @retry(requests.ConnectionError, tries=4, delay=3, backoff=2)
+                    @retry(requests.ConnectionError, tries=6, delay=3, backoff=2)
                     def urlopen_with_retry():
-                        return requests.get(url, allow_redirects=True, proxies=proxy_object)
+                        try:
+                            rq = requests.get(url, allow_redirects=True, proxies=proxy_object, timeout=(3, 120))
+                            return rq
+                        except ConnectTimeout:
+                            return None
+
                 else:
                     # checking url with "retry" decorator, because the connection is dropped randomly.
-                    @retry(requests.ConnectionError, tries=4, delay=3, backoff=2)
+                    @retry(requests.ConnectionError, tries=6, delay=3, backoff=2)
                     def urlopen_with_retry():
-                        return requests.get(url, allow_redirects=True)
+                        try:
+                            rq = requests.get(url, allow_redirects=True, timeout=(3, 120))
+                            return rq
+                        except ConnectTimeout:
+                            return None
 
                 if proxy_on is True:
                     # Thanks to random connection dropouts, the function is treated with a decorator.
-                    @retry(requests.ConnectionError, tries=4, delay=3, backoff=2)
+                    @retry(requests.ConnectionError, tries=6, delay=3, backoff=2)
                     def url_gethead():
-                        return requests.head(dl_link, allow_redirects=True, proxies=proxy_object)
+                        try:
+                            rq = requests.head(dl_link, allow_redirects=True, proxies=proxy_object, timeout=(3, 120))
+                            return rq
+                        except ConnectTimeout:
+                            return None
                 else:
-                    @retry(requests.ConnectionError, tries=4, delay=3, backoff=2)
+                    @retry(requests.ConnectionError, tries=6, delay=3, backoff=2)
                     def url_gethead():
-                        return requests.head(dl_link, allow_redirects=True)
+                        try:
+                            rq = requests.head(dl_link, allow_redirects=True, timeout=(3, 120))
+                            return rq
+                        except ConnectTimeout:
+                            return None
+
 
                 # Instead of urllib, we use requests.get to download files. Thanks to random connection dropouts, the function is treated with a decorator.
-                @retry(requests.ConnectionError, tries=4, delay=3, backoff=2)
+                @retry(requests.ConnectionError, tries=6, delay=3, backoff=2)
                 def urlopen_with_retry():
-                    return requests.get(dl_link, allow_redirects=True)
+                    try:
+                        rq = requests.get(dl_link, allow_redirects=True, timeout=(3, 120))
+                        return rq
+                    except ConnectTimeout:
+                        return None
 
                 urlhead = url_gethead()
                 size_valid = False
 
                 # We also check size of the attachment here (see DB load piece below), in case the link in xml was invalid and the code decided
                 # to try live version, which went OK (but has never been tested for valid file size):
-                if 'Content-Length' in urlhead.headers:
-                    if urlhead.headers['Content-Length'].isnumeric():
-                        if int(urlhead.headers['Content-Length']) > 0:
-                            req = urlopen_with_retry()
-                            size_valid = True
-                            open(target_path_prefix + cid + "/" + operstr[len(operstr) - 1], 'wb').write(req.content)
+                if urlhead is not None:
+                    if 'Content-Length' in urlhead.headers:
+                        if urlhead.headers['Content-Length'].isnumeric():
+                            if int(urlhead.headers['Content-Length']) > 0:
+                                req = urlopen_with_retry()
+                                if req is not None:
+                                    size_valid = True
+                                    open(target_path_prefix + cid + "/" + operstr[len(operstr) - 1], 'wb').write(req.content)
 
                 if size_valid is True:
                     if j < len(links_list) - 1:
@@ -293,8 +340,11 @@ def contract_download(links_list, cid, target_path_prefix, att_state, proxy_on, 
                 else:
                     print("\n\tThe file to be downloaded has zero size, therefore is invalid. Skipping...")
 
-                r = 0
-                attachments_processed += 1
+                if urlhead is None:
+                    print("Timeout error while processing head.")
+                else:
+                    r = 0
+                    attachments_processed += 1
 
             return attachments_processed, error
 
@@ -309,6 +359,7 @@ def contract_download(links_list, cid, target_path_prefix, att_state, proxy_on, 
 
         # All other errors:
         except Exception as e:
+            print(repr(e))
             return -1, repr(e)
 
 
@@ -390,129 +441,144 @@ def get_live_links(parent_urls, runlevel, proxy_on, proxy_object, current_links=
 
         if proxy_on is True:
             # checking url with "retry" decorator, because the connection is dropped randomly.
-            @retry(requests.ConnectionError, tries=4, delay=3, backoff=2)
+            @retry(requests.ConnectionError, tries=6, delay=3, backoff=2)
             def urlopen_with_retry2():
-                return requests.get(url, allow_redirects=True, proxies=proxy_object)
+                try:
+                    rq = requests.get(url, allow_redirects=True, proxies=proxy_object, timeout=(3, 120))
+                    return rq
+                except ConnectTimeout:
+                    return None
 
             page_data = urlopen_with_retry2()
+            print(page_data.status_code)
         else:
             # checking url with "retry" decorator, because the connection is dropped randomly.
-            @retry(requests.ConnectionError, tries=4, delay=3, backoff=2)
+            @retry(requests.ConnectionError, tries=6, delay=3, backoff=2)
             def urlopen_with_retry3():
-                return requests.get(url, allow_redirects=True)
+                try:
+                    rq = requests.get(url, allow_redirects=True, timeout=(3, 120))
+                    return rq
+                except ConnectTimeout:
+                    return None
 
             page_data = urlopen_with_retry3()
+            if page_data is not None:
+                print(page_data.status_code)
 
         # Site is loaded successfully:
-        if page_data.ok:
-            doc = lh.fromstring(page_data.content)
+        if page_data is not None:
+            if page_data.ok:
+                doc = lh.fromstring(page_data.content)
 
-            try:
-                # This html class contains links to attachments. If there are no attachments,
-                # usually there is no such html class, which will raise en error.
-                attachs = doc.find_class('area area2')[0][1]
+                try:
+                    # This html class contains links to attachments. If there are no attachments,
+                    # usually there is no such html class, which will raise en error.
+                    attachs = doc.find_class('row gx-2 py-2')[0][1]
 
-                if runlevel == 0:
-                    print(" web location OK, extracting attachment download links.")
-
-                total_valid_links += 1
-
-                if len(attachs) > 0:
-                    # This is for runlevel == 0, i.e. the links passed from XML are non-functional.
                     if runlevel == 0:
-                        for attach in attachs:
-                            print("\t\tDownload link: https://www.crz.gov.sk" + attach[1].attrib['href'] + "...", end="")
+                        print(" web location OK, extracting attachment downnload links.")
 
-                            # Check, if url is alive and say something about it to the user:
-                            if url_is_alive('https://www.crz.gov.sk' + attach[1].attrib['href']):
-                                c_links.append('https://www.crz.gov.sk' + attach[1].attrib['href'])
-                                print(" is OK.")
-                            else:
-                                print(" is invalid.")
+                    total_valid_links += 1
 
-                        if len(c_links) > 0:
-                            no_new_links = False
-                            print("\tValid download links found, proceeding with download.")
-                        else:
-                            print("\tNo valid download links found, download cancelled.")
-
-                        # This command speeds up the process according to the fact that
-                        # only one of the passed parent_links works. Thus, if the code made it
-                        # here, we already have what we wanted and do not need to try another
-                        # link from the list.
-                        break
-
-                    # This is for runlevel == 1, i.e. comparison of links passed from XML with
-                    # live version (but those from XML work):
-                    else:
-                        announcement_done = False
-
-                        # We only proceed if there are already some links passed, otherwise it would be
-                        # the runlevel = 0 situation:
-                        if current_links != ():
-                            # For comparison purposes, we should unify letter case and make it case-insensitive,
-                            # in case (mainly) the extension has its case messed up.
-                            current_links_lowercase = [lnk.casefold() for lnk in current_links]
-
-                            # Already working links from XML are added to the returned list:
-                            c_links = c_links + current_links
-                            check_len = len(current_links)
-
-                            # Here we compare what we found online with that, which is passed from XML:
+                    if len(attachs) > 0:
+                        # This is for runlevel == 0, i.e. the links passed from XML are non-functional.
+                        if runlevel == 0:
                             for attach in attachs:
-                                # If this is True, we have found a unique new link:
-                                if 'https://www.crz.gov.sk' + attach[1].attrib['href'].casefold() not in current_links_lowercase:
-                                    # Announcement, which is displayed only once for all the new unique links:
-                                    if announcement_done is False:
-                                        print("additional links to files found, appending them to the links list:")
-                                        announcement_done = True
+                                # print(attach.tostring())
+                                print("\t\tDownload link: https://www.crz.gov.sk" + attach.attrib['href'] + "...", end="")
 
-                                    # Unique link is appended and logged to the console:
-                                    c_links.append('https://www.crz.gov.sk' + attach[1].attrib['href'])
-                                    print(f"\t\tAppending: https://www.crz.gov.sk{attach[1].attrib['href']}")
+                                # Check, if url is alive and say something about it to the user:
+                                if url_is_alive('https://www.crz.gov.sk' + attach.attrib['href']):
+                                    c_links.append('https://www.crz.gov.sk' + attach.attrib['href'])
+                                    print(" is OK.")
+                                else:
+                                    print(" is invalid.")
 
-                            # If the list of links to be returned is bigger than the one originally passed,
-                            # there must have been new unique links added.
-                            if len(c_links) > check_len:
+                            if len(c_links) > 0:
                                 no_new_links = False
-
-                            # ..on the contrary, if the length matches, nothing noteworthy happened:
+                                print("\tValid download links found, proceeding with download.")
                             else:
-                                print("no additional files found, proceeding with original links.")
+                                print("\tNo valid download links found, download cancelled.")
 
-                        # If we passed nothing to compare, we get nothing in return:
+                            # This command speeds up the process according to the fact that
+                            # only one of the passed parent_links works. Thus, if the code made it
+                            # here, we already have what we wanted and do not need to try another
+                            # link from the list.
+                            break
+
+                        # This is for runlevel == 1, i.e. comparison of links passed from XML with
+                        # live version (but those from XML work):
                         else:
-                            c_links = []
-                else:
-                    if runlevel == 1:
-                        # This "error" state is different for runlevels 0 and 1. If there are
-                        # no links to attachments in live version when runlevel == 0, the situation
-                        # is rather bad, because there are literally no links to attachments to use
-                        # and no files can be downloaded at all.
-                        # However, with runlevel == 1, this usually means that there are just no
-                        # links to attachments in addition to the ones already passed from XML,
-                        # so we can and will still use those ones.
-                        print("no additional files found, proceeding with original links.")
+                            announcement_done = False
 
-            except Exception as e:
-                print(repr(e))
-                if runlevel == 0:
-                    # See comment above.
-                    print(" web location is OK, but does not contain any valid download links (files).")
+                            # We only proceed if there are already some links passed, otherwise it would be
+                            # the runlevel = 0 situation:
+                            if current_links != ():
+                                # For comparison purposes, we should unify letter case and make it case-insensitive,
+                                # in case (mainly) the extension has its case messed up.
+                                current_links_lowercase = [lnk.casefold() for lnk in current_links]
 
-                else:
-                    # See comment above.
-                    print("Live version does not contain any valid download links (files).")
-                pass
+                                # Already working links from XML are added to the returned list:
+                                c_links = c_links + current_links
+                                check_len = len(current_links)
 
-        else:
-            if runlevel == 0:
-                # See comment above
-                print(" web location is invalid.")
+                                # Here we compare what we found online with that, which is passed from XML:
+                                for attach in attachs:
+                                    # If this is True, we have found a unique new link, but first filter out only
+                                    # the line containing it:
+                                    if 'href' in attach.attrib:
+                                        if 'https://www.crz.gov.sk' + attach.attrib['href'].casefold() not in current_links_lowercase:
+                                            # Announcement, which is displayed only once for all the new unique links:
+                                            if announcement_done is False:
+                                                print("additional links to files found, appending them to the links list:")
+                                                announcement_done = True
+
+                                            # Unique link is appended and logged to the console:
+                                            c_links.append('https://www.crz.gov.sk' + attach.attrib['href'])
+                                            print(f"\t\tAppending: https://www.crz.gov.sk{attach.attrib['href']}")
+
+                                # If the list of links to be returned is bigger than the one originally passed,
+                                # there must have been new unique links added.
+                                if len(c_links) > check_len:
+                                    no_new_links = False
+
+                                # ..on the contrary, if the length matches, nothing noteworthy happened:
+                                else:
+                                    print("no additional files found, proceeding with original links.")
+
+                            # If we passed nothing to compare, we get nothing in return:
+                            else:
+                                c_links = []
+                    else:
+                        if runlevel == 1:
+                            # This "error" state is different for runlevels 0 and 1. If there are
+                            # no links to attachments in live version when runlevel == 0, the situation
+                            # is rather bad, because there are literally no links to attachments to use
+                            # and no files can be downloaded at all.
+                            # However, with runlevel == 1, this usually means that there are just no
+                            # links to attachments in addition to the ones already passed from XML,
+                            # so we can and will still use those ones.
+                            print("no additional files found, proceeding with original links.")
+
+                except Exception as e:
+                    print(repr(e))
+                    if runlevel == 0:
+                        # See comment above.
+                        print(" web location is OK, but does not contain any valid download links (files).")
+
+                    else:
+                        # See comment above.
+                        print("Live version does not contain any valid download links (files).")
+                    pass
+
             else:
-                if total_valid_links == 0:
+                if runlevel == 0:
                     # See comment above
-                    print("no additional files found, proceeding with original links.")
+                    print(" web location is invalid.")
+                else:
+                    if total_valid_links == 0:
+                        # See comment above
+                        print("no additional files found, proceeding with original links.")
 
     return no_new_links, c_links
 
@@ -634,120 +700,137 @@ duplicates = 0
 IDs = []
 urls = []
 
+socket.setdefaulttimeout(150)
+
 while i < number_of_contracts:
-    check_links = []
+    try:
+        check_links = []
 
-    print(f"*** Contract number {i + 1} out of {number_of_contracts}, ID: {download_db[i][0]} ***")
+        print(f"*** Contract number {i + 1} out of {number_of_contracts}, ID: {download_db[i][0]} ***")
 
-    # Check for duplicates - if the same ID is in IDs DB, the download of that particular contract
-    # is stopped.
-    if download_db[i][0] not in IDs:
-        # Check all download links for currently processed ID:
-        no_link = False
+        # Check for duplicates - if the same ID is in IDs DB, the download of that particular contract
+        # is stopped.
+        if download_db[i][0] not in IDs:
+            # Check all download links for currently processed ID:
+            no_link = False
 
-        # First we check, whether the list extracted from XML contains some links, not just ID:
-        if len(download_db[i]) > 2:
-            for j in range(0, len(download_db[i])):
-                # Link validity check:
-                if str(download_db[i][j]).find("https://") >= 0:
-                    # Are found links alive?
-                    if url_is_alive(download_db[i][j]) is False:
-                        number_of_attachments -= 1
-                        no_link = True
-                        break
-                    else:
-                        # If the found link is alive, we add it to the resulting active links list.
-                        check_links.append(download_db[i][j])
+            # First we check, whether the list extracted from XML contains some links, not just ID:
+            if len(download_db[i]) > 2:
+                for j in range(0, len(download_db[i])):
+                    # Link validity check:
+                    if str(download_db[i][j]).find("https://") >= 0:
+                        # Are found links alive?
+                        if url_is_alive(download_db[i][j]) is False:
+                            number_of_attachments -= 1
+                            no_link = True
+                            break
+                        else:
+                            # If the found link is alive, we add it to the resulting active links list.
+                            check_links.append(download_db[i][j])
 
-            # The links in XML might be OK, but we also need to check live version
-            # of the website, whether there were additional files added in the meantime:
-            if no_link is False:
-                # These are parent_urls for link extraction function:
+                # The links in XML might be OK, but we also need to check live version
+                # of the website, whether there were additional files added in the meantime:
+                if no_link is False:
+                    # These are parent_urls for link extraction function:
+                    urls = ['https://crz.gov.sk/' + str(download_db[i][0]),
+                            'https://crz.gov.sk/zmluva/' + str(download_db[i][0])]
+
+                    c_len = len(check_links)
+
+                    # Checking if there are additional links to attachments:
+                    result, check_links = get_live_links(urls, 1, proxy_present, proxy, check_links)
+
+                    # result holds information, whether more links were added.
+                    # result = False -> new links were added (no_new_links = False)
+                    # result = True  -> no new links were added (now_new_links = True)
+                    if result is False:
+                        # If something was added, we calculate difference number for new links only).
+                        diff = len(check_links) - c_len
+                        print(f"\tAdded {diff} new links from live version.")
+                        number_of_attachments += diff
+            else:
+                # No links in XML:
+                no_link = True
+
+            # If the links in the source XML file were not alive (or even existing), we have to load
+            # live version of the website and take the links from its source:
+            if no_link is True:
+                # In case any links were added above before the code found an invalid link, we reset them here:
                 urls = ['https://crz.gov.sk/' + str(download_db[i][0]),
                         'https://crz.gov.sk/zmluva/' + str(download_db[i][0])]
 
-                c_len = len(check_links)
+                print("\t[*** ERROR ***] Invalid links in XML file. Trying live version...")
 
-                # Checking if there are additional links to attachments:
-                result, check_links = get_live_links(urls, 1, proxy_present, proxy, check_links)
+                no_link, check_links = get_live_links(urls, 0, proxy_present, proxy)
 
-                # result holds information, whether more links were added.
-                # result = False -> new links were added (no_new_links = False)
-                # result = True  -> no new links were added (now_new_links = True)
-                if result is False:
-                    # If something was added, we calculate difference number for new links only).
-                    diff = len(check_links) - c_len
-                    print(f"\tAdded {diff} new links from live version.")
-                    number_of_attachments += diff
-        else:
-            # No links in XML:
-            no_link = True
+                # If valid links were found, we need to increment total number of files to be downloaded:
+                if no_link is False:
+                    number_of_attachments += len(check_links)
 
-        # If the links in the source XML file were not alive (or even existing), we have to load
-        # live version of the website and take the links from its source:
-        if no_link is True:
-            # In case any links were added above before the code found an invalid link, we reset them here:
-            urls = ['https://crz.gov.sk/' + str(download_db[i][0]),
-                    'https://crz.gov.sk/zmluva/' + str(download_db[i][0])]
-
-            print("\t[*** ERROR ***] Invalid links in XML file. Trying live version...")
-
-            no_link, check_links = get_live_links(urls, 0, proxy_present, proxy)
-
-            # If valid links were found, we need to increment total number of files to be downloaded:
+            # Normal processing: Here we either added some links, found any links in live version or are just using working links from XML:
             if no_link is False:
-                number_of_attachments += len(check_links)
+                # If any of the error correcting mechanisms above were successful, we can proceed with download, which still
+                # might fail:
+                status, err = contract_download(check_links, download_db[i][0], working_dir, att, proxy_present, proxy)
 
-        # Normal processing: Here we either added some links, found any links in live version or are just using working links from XML:
-        if no_link is False:
-            # If any of the error correcting mechanisms above were successful, we can proceed with download, which still
-            # might fail:
-            status, err = contract_download(check_links, download_db[i][0], working_dir, att, proxy_present, proxy)
+                # The download was successful:
+                if status > -1:
+                    att += status
+                    dl_size = dl_size + download_db[i][len(download_db[i]) - 1]
 
-            # The download was successful:
-            if status > -1:
-                att += status
-                dl_size = dl_size + download_db[i][len(download_db[i]) - 1]
+                    # Eye candy output:
+                    print('')
+                    print('\n\t\t' + Colour.BOLD + Colour.CYAN + '[' + str(round((dl_size / size) * 100, 1)) + '%]' + Colour.END, end="")
+                    print(f" {round(dl_size, 0)}/{round(size - dl_size, 0)} MB, Saved: "
+                          f"{att}, Skipped: {skipped}, Missing: {missing_files}, Duplicates: {duplicates}; of total: {number_of_attachments}")
+                    print('')
 
-                # Eye candy output:
-                print('')
-                print('\n\t\t' + Colour.BOLD + Colour.CYAN + '[' + str(round((dl_size / size) * 100, 1)) + '%]' + Colour.END, end="")
-                print(f" {round(dl_size, 0)}/{round(size - dl_size, 0)} MB, Saved: "
-                      f"{att}, Skipped: {skipped}, Missing: {missing_files}, Duplicates: {duplicates}; of total: {number_of_attachments}")
-                print('')
+                # If something else went wrong during download despite all the effort, we let the user know:
+                else:
+                    print(f' Error: {err} encountered while downloading files for contract ID {download_db[i][0]}, skipping.')
+                    skipped += 1
 
-            # If something else went wrong during download despite all the effort, we let the user know:
             else:
-                print(f' Error: {err} encountered while downloading files for contract ID {download_db[i][0]}, skipping.')
-                skipped += 1
+                # There are also contracts / supplements at CRZ, which lack any attachments (the subpage exists, but there are no files)
+                # and we need to handle that somehow.
+                print("\tNo files associated with the processed contract ID - adding to the list of contracts with missing files.")
+                missing_files += 1
 
+            # Add processed ID to the IDs database, so that it is not processed again (duplicate prevention):
+            IDs.append(download_db[i][0])
+            i += 1
+
+        # The processed contract ID was found within the list of already processed IDs, therefore it is a duplicate record.
+        # We want to do something in that case (like keep track of duplicate records)...
         else:
-            # There are also contracts / supplements at CRZ, which lack any attachments (the subpage exists, but there are no files)
-            # and we need to handle that somehow.
-            print("\tNo files associated with the processed contract ID - adding to the list of contracts with missing files.")
-            missing_files += 1
+            # First, we find the original record, which is identical to the one we are processing:
+            found = 0
 
-        # Add processed ID to the IDs database, so that it is not processed again (duplicate prevention):
-        IDs.append(download_db[i][0])
+            if len(IDs) > 0:
+                for x, contract_id in enumerate(IDs):
+                    if contract_id == download_db[i][0]:
+                        found = x
+                        break
+
+            # Here we complain:
+            print(f"  ID {download_db[i][0]} is a duplicate or separately added attachment of contract no. {found + 1} - skipping contract (adding to the duplicates count).")
+            # Here we add this to the duplicates dump:
+            duplicates += 1
+            i += 1
+    except socket.timeout or socket.error or TimeoutError or ConnectionError or requests.exceptions.ReadTimeout or ReadTimeoutError:
+        if download_db[i][0] not in IDs:
+            IDs.append(download_db[i][0])
         i += 1
+        print("Socket has timed out. Skipping to the next file.")
+        pass
 
-    # The processed contract ID was found within the list of already processed IDs, therefore it is a duplicate record.
-    # We want to do something in that case (like keep track of duplicate records)...
-    else:
-        # First, we find the original record, which is identical to the one we are processing:
-        found = 0
-
-        if len(IDs) > 0:
-            for x, contract_id in enumerate(IDs):
-                if contract_id == download_db[i][0]:
-                    found = x
-                    break
-
-        # Here we complain:
-        print(f"  ID {download_db[i][0]} is a duplicate or separately added attachment of contract no. {found + 1} - skipping contract (adding to the duplicates count).")
-        # Here we add this to the duplicates dump:
-        duplicates += 1
-        i += 1
+    except urllib.error.URLError as er1:
+        if isinstance(er1.reason, socket.timeout):
+            if download_db[i][0] not in IDs:
+                IDs.append(download_db[i][0])
+            i += 1
+            print("Socket has timed out. Skipping to the next file.")
+            pass
 
 # The final report:
 print('')
