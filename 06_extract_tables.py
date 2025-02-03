@@ -8,12 +8,37 @@
 # Extract tables from already tagged and filtered relevant contracts    |
 # --------------------------------------------------------------------  |
 
+# Several notes regarding the installation of camelot for extraction
+# of tables from PDF files:
+#
+# 1. DO NOT INSTALL package called Camelot (or camelot). This is not
+#    the right camelot. If you already have the wrong camelot, please
+#	 uninstall it (python3 -m pip uninstall Camelot).
+#
+# 2. Install the right camelot using the commands below:
+#
+# 		python3 -m pip install camelot-py --break-system-packages
+#		python3 -m pip install camelot-py[cv] --break-system-packages
+#		python3 -m pip install ghostscript python3-tk --break-system-packages
+#		python3 -m pip install opencv-python-headless
+#		python3 -m pip install 'pypdf2<3.0.0' --break-system-packages
+#
+# 	 The last line is added, because pypdf2 of higher version than
+#	 3.0.0 already uses different tool for parsing PDF files. It will
+#	 raise an error that <some_PDF_tool> is deprecated and was replaced
+#	 by <some_other_PDF_tool>. Hence pypdf2 version must by less than
+#	 3.0.0.
+#
+#	 The only change int he code itself is to replace the import line
+#	 with: import camelot.io as camelot (already done).
+
 import os
 import numpy as np
 import pandas as pd
-import camelot			# $ python3.9 -m pip install camelot-py
+import camelot.io as camelot			# $ python3.9 -m pip install camelot-py
 						# $ python3.9 -m pip install "camelot-py[cv]"
 import time
+import signal
 import sys
 
 # pdfminer for extracting information about number of pages
@@ -21,6 +46,24 @@ from pdfminer.pdfparser import PDFParser
 from pdfminer.pdfdocument import PDFDocument
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfinterp import resolve1
+
+# Timeout class
+class Timeout:
+
+	def __init__(self, seconds=1, error_message='Timeout'):
+		self.seconds = seconds
+		self.error_message = error_message
+
+	def handle_timeout(self, signum, frame):
+		raise TimeoutError(self.error_message)
+
+	def __enter__(self):
+		signal.signal(signal.SIGALRM, self.handle_timeout)
+		signal.alarm(self.seconds)
+
+	def __exit__(self, type, value, traceback):
+		signal.alarm(0)
+
 
 # Destination:
 working_dir = os.getcwd()+'/contracts_relevant/'
@@ -151,7 +194,15 @@ if 'Pocet_stran' not in DB_clean_tagged.columns:
 							os.system('cp ' + contract_dir + f + ' ' + contract_dir + f + '.pdf')
 							f += '.pdf'
 
-					tables = camelot.read_pdf(contract_dir + f, pages=str(page), suppress_stdout=True)
+					try:
+						TimeoutReached = False
+						with Timeout(seconds=10):
+							tables = camelot.read_pdf(contract_dir + f, pages=str(page), flavor="hybrid", suppress_stdout=True, parallel=True)
+
+					except TimeoutError as e:
+						TimeoutReached = True
+						pass
+						break
 
 					if len(tables) > 0:
 						for m in range(0, len(tables)):
@@ -183,7 +234,10 @@ if 'Pocet_stran' not in DB_clean_tagged.columns:
 				else:
 					time_list[2] = f"{int(hours)}:{int(minutes):02d}:{int(seconds):02d}"
 
-				print('\n\tProcessed ', p, ' pages in ', time_list[len(time_list) - 1])
+				if not TimeoutReached:
+					print('\n\tProcessed ', p, ' pages in ', time_list[len(time_list) - 1])
+				else:
+					print('\n\tUnrecoverable errors encountered while processing contract ID: ', row['ID'].rjust(ID_len),', skipping to the next contract.')
 
 				DB_clean_tagged.at[index, 'Pocet_tabuliek'] = int(number_of_tables)
 				DB_clean_tagged.at[index, 'Tabulky_strany'] = str(tables_pages)
